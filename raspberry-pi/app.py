@@ -24,6 +24,21 @@ def get_latest_metric(metric_name, device_name):
     return value
 
 
+@app.route("/api/latest")
+def latest_data():
+    return {
+        "esp32_1": {
+            "temperature": get_latest_metric("temperature", "esp32_1"),
+            "humidity": get_latest_metric("humidity", "esp32_1"),
+        },
+        "pi": {
+            "cpu_temp": get_latest_metric("cpu_temp", "pi"),
+            "ram_usage": get_latest_metric("ram_usage", "pi"),
+            "disk_usage": get_latest_metric("disk_usage", "pi")
+        }
+    }
+
+
 @app.route("/")
 def home():
     temp = get_latest_metric("temperature", "esp32_1")
