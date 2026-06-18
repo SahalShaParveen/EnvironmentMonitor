@@ -1,9 +1,11 @@
 from flask import Flask, request, render_template
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 app = Flask(__name__)
 DB = "data.db"
+
+FRESHNESS_SECONDS = 15
 
 
 def get_latest_metric(metric_name, device_name):
@@ -11,7 +13,7 @@ def get_latest_metric(metric_name, device_name):
     cursor = conn.cursor()
 
     cursor.execute("""
-    SELECT value
+    SELECT value, timestamp
     FROM readings
     WHERE metric = ? AND device=?
     ORDER BY id DESC
@@ -21,21 +23,40 @@ def get_latest_metric(metric_name, device_name):
     row = cursor.fetchone()
     conn.close()
 
-    value = row[0] if row is not None else None
-    return value
+    if row is None:
+        return None, None
+
+    value = row[0]
+    timestamp = row[1]
+
+    return value, timestamp
+
+
+def is_fresh(timestamp):
+    if timestamp is None:
+        return False
+
+    last = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    now = datetime.now(timezone.utc)
+    return (now - last) < timedelta(seconds=FRESHNESS_SECONDS)
 
 
 @app.route("/api/latest")
 def latest_data():
+    temperature, temperature_ts = get_latest_metric("temperature", "esp32_1")
+    humidity, humidity_ts = get_latest_metric("humidity", "esp32_1")
+    cpu_temp, cpu_temp_ts = get_latest_metric("cpu_temp", "pi")
+    ram_usage, ram_usage_ts = get_latest_metric("ram_usage", "pi")
+    disk_usage, disk_usage_ts = get_latest_metric("disk_usage", "pi")
     return {
         "esp32_1": {
-            "temperature": get_latest_metric("temperature", "esp32_1"),
-            "humidity": get_latest_metric("humidity", "esp32_1"),
+            "temperature": temperature if is_fresh(temperature_ts) else None,
+            "humidity": humidity if is_fresh(humidity_ts) else None,
         },
         "pi": {
-            "cpu_temp": get_latest_metric("cpu_temp", "pi"),
-            "ram_usage": get_latest_metric("ram_usage", "pi"),
-            "disk_usage": get_latest_metric("disk_usage", "pi")
+            "cpu_temp": cpu_temp if is_fresh(cpu_temp_ts) else None,
+            "ram_usage": ram_usage if is_fresh(ram_usage_ts) else None,
+            "disk_usage": disk_usage if is_fresh(disk_usage_ts) else None
         }
     }
 
@@ -49,7 +70,7 @@ def history():
     conn = sqlite3.connect(DB)
     cursor = conn.cursor()
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     if period == "1h":
         start_time = now - timedelta(hours=1)
@@ -72,8 +93,16 @@ def history():
     rows = cursor.fetchall()
     conn.close()
 
+    data = []
+
+    for timestamp, value in rows:
+        data.append({
+            "x": timestamp,
+            "y": value
+        })
+
     return {
-        "data": rows
+        "data": data
     }
 
 
